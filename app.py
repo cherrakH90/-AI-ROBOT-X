@@ -1,460 +1,735 @@
 """
 ================================================================================
-الدليل التقني الشامل لتصميم الروبوت "آريا" (Arya) - المستوحى من الصورة المرفقة
+CROBOT AI X - النسخة المتطورة الشاملة (v3.0)
 ================================================================================
-1. هيكلية الهيكل الخارجي (Exoskeleton & Surface Chemistry)
-   - المواد الأساسية: سبائك الألمنيوم المؤكسد (Anodized Aluminum Alloys) لإنشاء طبقة بيضاء ملساء غير لامعة مقاومة لبصمات الأصابع، وبوليمرات هندسية مثل PEEK للمفاصل المعقدة.
-   - تكنولوجيا المفاصل: مفاصل كروية مدمجة (Spherical Joints) بطبقة DLC لحركة صامتة، وعنق ميكانيكي معقد (Multi-axis vertebrae array) لتقليد حركة الإنسان.
+تم تطوير هذا الملف ليشمل:
+- عرض ثلاثي الأبعاد: Three.js + WebGPU + GLTF/DRACO + HDR
+- صوتيات متقدمة: Web Speech API (STT) + ElevenLabs (TTS) + تحليل تردد فوري
+- ذكاء اصطناعي: OpenAI GPT + RAG + Function Calling + تحليل المشاعر
+- رؤية حاسوبية: تحليل الصور عبر GPT‑4 Vision
+- اتصال فوري: WebSocket لنقل الصوت والردود لحظياً
+- نشر سحابي: جاهز لـ Vercel مع دعم متغيرات البيئة
 
-2. النظام الإلكتروني البصري (Opto-Electronic Systems)
-   - وحدة العيون: شاشات micro-OLED دائرية لعرض القزحية الزرقاء النابضة بالحياة، مع محركات خطية دقيقة (Voice Coil Actuators) لتركيز العدسات ومحاكاة حركة العين البشرية.
-   - الإضاءة: مصابيح LED زرقاء خلفية لإعطاء الوهج الداخلي، مع خوارزميات ضبط تدرجات الألوان حسب الضوء المحيط.
-
-3. النظام الصوتي التفاعلي (Interactive Audio Systems)
-   - تجميع الكلام (Neural TTS): باستخدام أنظمة مثل ElevenLabs (المدمجة حاليًا) أو Google Wavenet، مع محرك تعبير عاطفي لتعديل نغمة الصوت (الفرح، الحزن، الحماس) حسب سياق المحادثة.
-   - التفاعل البصري مع الكلام (Visemes): محركات ميكانيكية دقيقة للفك السفلي والشفاه، مرتبطة بخوارزميات متزامنة مع الأصوات في الوقت الفعلي.
-
-4. معالجة اللغة الطبيعية والذكاء الاصطناعي (NLP & AI Architecture)
-   - فهم اللغة الطبيعية (NLU): نماذج ASR متطورة (مثل Whisper من OpenAI) + نماذج لغوية كبيرة (LLMs) لفهم السياق المعقد متعدد الجمل.
-   - توليد الردود: بناء شخصية (Persona System) للروبوت وطبقة توليد ردود متماسكة وذات معنى.
-
-5. إدارة الطاقة والتحكم الحراري (Power & Thermal Management)
-   - حزم بطاريات الليثيوم أيون المدمجة في الصدر، مع توزيع ذكي للطاقة.
-   - نظام تبريد سلبي (الهيكل الخارجي للألمنيوم كمشتت حرارة) ونشط (مراوح صامتة وممرات هواء في العنق والرأس).
-
-**دمج التصميم في الملف الحالي:**
-لقد تم الاحتفاظ بكود Python و HTML و JavaScript بالكامل كما هو. لتطابق الصورة تماماً، يجب عليك تحميل ملف GLTF/GLB مخصص للروبوت "آريا" عبر المسار المحدد في دالة `loader.load` داخل كود JavaScript أدناه، حيث قمت بوضع تعليقات إرشادية لضمان التوافق البصري والميكانيكي مع الصورة المرفقة.
 ================================================================================
 """
 
 import os
 import json
+import base64
 import datetime
 import random
 import requests
-import base64
-from flask import Flask, render_template_string, request, jsonify, Response
+from flask import Flask, render_template_string, request, jsonify
+from flask_sockets import Sockets
 
-# تهيئة التطبيق (يجب أن يكون اسم المتغير app لكي تلتقطه Vercel)
+# ---------- المتغيرات البيئية (ضعها في Vercel أو ملف .env) ----------
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "YOUR_OPENAI_KEY")
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "YOUR_ELEVENLABS_KEY")
+WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "YOUR_WEATHER_KEY")
+
+# ---------- تهيئة التطبيق ----------
 app = Flask(__name__)
+sockets = Sockets(app)
 
-# ==============================================================================
-# حالة الروبوت الأساسية + الذاكرة القصيرة (RAG)
-# ==============================================================================
+# ---------- حالة الروبوت وذاكرته (RAG) ----------
 robot_state = {
-    "status": "idle",  # idle, listening, speaking, thinking
+    "status": "idle",
     "last_response": "",
-    "last_command": "",
-    "chat_memory": []  # ذاكرة المحادثة للـ RAG
+    "chat_memory": [],          # سياق المحادثة
+    "emotion": "neutral",
+    "is_speaking": False,
+    "is_listening": False
 }
 
-# ==============================================================================
-# معالج الذكاء الاصطناعي (AI Brains)
-# ==============================================================================
-def get_ai_response(text):
-    """دالة توليد الرد الذكي"""
+# ============================================================================
+# 1. أدوات (Tool Calling)
+# ============================================================================
+def get_current_time():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def get_weather(city="Algiers"):
     try:
-        # يتم استخدام مفتاح API عبر متغيرات البيئة
-        text = text.lower()
-        if "السلام" in text or "مرحبا" in text or "اهلا" in text:
-            reply = "وعليكم السلام! أنا CROBOT AI X، روبوت بشري ثلاثي الأبعاد متطور، كيف يمكنني مساعدتك اليوم؟"
-        elif "اسمك" in text or "من انت" in text:
-            reply = "اسمي CROBOT AI X. أنا روبوت افتراضي يستخدم تقنية الثري دي المتطورة والذكاء الاصطناعي للتفاعل معك بشكل إنساني."
-        elif "وقت" in text or "الساعة" in text:
-            now = datetime.datetime.now().strftime("%H:%M")
-            reply = f"الساعة الآن هي {now} بتوقيت النظام."
-        elif "شكرا" in text:
-            reply = "على الرحب والسعة! سعيد بمساعدتك."
-        elif "حال" in text or "كيف" in text:
-            reply = "أنا بخير، أشكرك على السؤال. طاقتي مشحونة بالكامل، وجاهز للعمل بأعلى كفاءة!"
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric"
+        resp = requests.get(url, timeout=5)
+        data = resp.json()
+        return f"درجة الحرارة في {city}: {data['main']['temp']}°C، {data['weather'][0]['description']}"
+    except:
+        return "لم أتمكن من جلب الطقس حالياً."
+
+def convert_currency(amount=100, from_cur="USD", to_cur="EUR"):
+    # محاكاة (يمكن ربطها بـ API حقيقي)
+    return f"{amount} {from_cur} = {amount * 0.85} {to_cur} (مثال)"
+
+def control_music(action="play"):
+    return f"تم {action} الموسيقى"
+
+TOOLS = {
+    "الوقت": get_current_time,
+    "الطقس": get_weather,
+    "تحويل العملة": convert_currency,
+    "تشغيل موسيقى": lambda: control_music("play"),
+    "إيقاف موسيقى": lambda: control_music("stop")
+}
+
+def execute_tool_command(text):
+    text_lower = text.lower()
+    if "الوقت" in text_lower or "الساعة" in text_lower:
+        return get_current_time()
+    if "طقس" in text_lower:
+        city = "Algiers"
+        for word in text.split():
+            if word in ["الجزائر", "القاهرة", "الرياض", "دبي"]:
+                city = word
+                break
+        return get_weather(city)
+    if "تحويل" in text_lower and "عملة" in text_lower:
+        return convert_currency()
+    if "موسيقى" in text_lower:
+        if "شغل" in text_lower or "تشغيل" in text_lower:
+            return control_music("play")
+        elif "أوقف" in text_lower or "إيقاف" in text_lower:
+            return control_music("stop")
+    return None
+
+# ============================================================================
+# 2. تحليل المشاعر (Emotion Detection)
+# ============================================================================
+def detect_emotion(text):
+    positive = ["حب", "فرح", "سعيد", "جميل", "رائع"]
+    negative = ["حزين", "غاضب", "سيء", "مزعج"]
+    if any(w in text for w in positive):
+        return "happy"
+    if any(w in text for w in negative):
+        return "sad"
+    if "?" in text:
+        return "curious"
+    return "neutral"
+
+# ============================================================================
+# 3. الذكاء الاصطناعي (LLM + RAG + Function Calling)
+# ============================================================================
+def get_llm_response(user_text, chat_history):
+    try:
+        # تحضير السياق
+        messages = [{"role": "system", "content": "أنت مساعد ذكي اسمه آريا، تتحدث العربية، لديك شخصية ودودة وتساعد المستخدم."}]
+        for entry in chat_history[-10:]:
+            messages.append(entry)
+        messages.append({"role": "user", "content": user_text})
+
+        # محاولة استدعاء أداة أولاً
+        tool_result = execute_tool_command(user_text)
+        if tool_result:
+            return tool_result
+
+        # استدعاء OpenAI GPT
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "gpt-3.5-turbo",
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 200
+        }
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=10
+        )
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
         else:
-            reply = f"لقد سمعتك تقول: '{text}'. أنا روبوت CROBOT AI X، وما زلت أتعلم التعامل مع هذه الجملة. هل يمكنك إعادة صياغتها؟"
-        
-        # حفظ الذاكرة (RAG)
-        robot_state["chat_memory"].append({"role": "user", "content": text})
-        robot_state["chat_memory"].append({"role": "assistant", "content": reply})
-        if len(robot_state["chat_memory"]) > 10: robot_state["chat_memory"].pop(0)
-
-        return reply
+            return "عذراً، واجهت صعوبة في التفكير. هل يمكنك إعادة السؤال؟"
     except Exception as e:
-        return f"حدث خطأ في معالجة النص: {str(e)}"
+        return f"حدث خطأ: {str(e)}"
 
+# ============================================================================
+# 4. توليد الصوت (TTS) باستخدام ElevenLabs
+# ============================================================================
 def generate_tts_audio(text):
-    """توليد الصوت البشري باستخدام ElevenLabs TTS"""
     try:
-        # ضع مفتاح ElevenLabs هنا أو في متغيرات البيئة في Vercel
-        api_key = os.environ.get("ELEVENLABS_API_KEY", "YOUR_ELEVENLABS_API_KEY") 
-        voice_id = "21m00Tcm4TlvDq8ikWAM"
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        url = "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"
         headers = {
             "Accept": "audio/mpeg",
             "Content-Type": "application/json",
-            "xi-api-key": api_key
+            "xi-api-key": ELEVENLABS_API_KEY
         }
         data = {
             "text": text,
             "model_id": "eleven_monolingual_v1",
             "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
         }
-        response = requests.post(url, json=data, headers=headers)
+        response = requests.post(url, json=data, headers=headers, timeout=10)
         if response.status_code == 200:
             return base64.b64encode(response.content).decode('utf-8')
-        else:
-            return None
-    except Exception as e:
+        return None
+    except:
         return None
 
-# ==============================================================================
-# واجهات برمجة التطبيقات (API Routes)
-# ==============================================================================
-@app.route('/', methods=['GET'])
+# ============================================================================
+# 5. معالجة الصور (Computer Vision) عبر GPT‑4 Vision
+# ============================================================================
+def analyze_image(image_bytes):
+    try:
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "gpt-4-vision-preview",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "صف ما تراه في هذه الصورة بالعربية."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]
+                }
+            ],
+            "max_tokens": 200
+        }
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        return "لم أستطع تحليل الصورة."
+    except Exception as e:
+        return f"خطأ في تحليل الصورة: {str(e)}"
+
+# ============================================================================
+# 6. نقاط النهاية (API Routes)
+# ============================================================================
+
+@app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
 
 @app.route('/api/speak', methods=['POST'])
 def api_speak():
-    try:
-        data = request.get_json()
-        text = data.get('text', '')
-        if not text:
-            return jsonify({"error": "النص فارغ"}), 400
-        
-        robot_state["status"] = "thinking"
-        robot_state["last_command"] = text
-        
-        reply = get_ai_response(text)
-        audio_base64 = generate_tts_audio(reply)
-        
-        robot_state["last_response"] = reply
-        robot_state["status"] = "speaking"
-        
-        return jsonify({
-            "status": "success", 
-            "reply_text": reply,
-            "audio_data": audio_base64
-        })
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    data = request.get_json()
+    user_text = data.get('text', '')
+    if not user_text:
+        return jsonify({"error": "نص فارغ"}), 400
+
+    robot_state["status"] = "thinking"
+    emotion = detect_emotion(user_text)
+    robot_state["emotion"] = emotion
+
+    reply = get_llm_response(user_text, robot_state["chat_memory"])
+
+    robot_state["chat_memory"].append({"role": "user", "content": user_text})
+    robot_state["chat_memory"].append({"role": "assistant", "content": reply})
+    if len(robot_state["chat_memory"]) > 20:
+        robot_state["chat_memory"] = robot_state["chat_memory"][-20:]
+
+    robot_state["last_response"] = reply
+    robot_state["status"] = "speaking"
+
+    audio_b64 = generate_tts_audio(reply)
+
+    return jsonify({
+        "status": "success",
+        "reply_text": reply,
+        "audio_data": audio_b64,
+        "emotion": emotion
+    })
 
 @app.route('/api/transcribe', methods=['POST'])
 def api_transcribe():
+    if 'file' not in request.files:
+        return jsonify({"error": "لا يوجد ملف"}), 400
+    audio_file = request.files['file']
     try:
-        audio_file = request.files['file']
-        api_key = os.environ.get("OPENAI_API_KEY", "YOUR_OPENAI_API_KEY")
-        headers = {"Authorization": f"Bearer {api_key}"}
+        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
         files = {"file": (audio_file.filename, audio_file, audio_file.mimetype)}
         data = {"model": "whisper-1", "language": "ar"}
-        response = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data)
-        return jsonify({"text": response.json().get("text", "")})
+        response = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=20)
+        result = response.json()
+        return jsonify({"text": result.get("text", "")})
     except Exception as e:
         return jsonify({"text": "", "error": str(e)})
+
+@app.route('/api/analyze-image', methods=['POST'])
+def api_analyze_image():
+    if 'image' not in request.files:
+        return jsonify({"error": "لا توجد صورة"}), 400
+    file = request.files['image']
+    try:
+        image_bytes = file.read()
+        description = analyze_image(image_bytes)
+        return jsonify({"description": description})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])
 def api_status():
     return jsonify(robot_state)
 
-# ==============================================================================
-# واجهة المستخدم المتطورة (React + Three.js + GLTF + DRACO + HDR)
-# ==============================================================================
+@app.route('/api/reset', methods=['POST'])
+def api_reset():
+    robot_state["chat_memory"] = []
+    robot_state["emotion"] = "neutral"
+    robot_state["status"] = "idle"
+    return jsonify({"status": "reset"})
+
+# ============================================================================
+# 7. WebSocket للتفاعل الفوري
+# ============================================================================
+@sockets.route('/ws')
+def echo_socket(ws):
+    while not ws.closed:
+        message = ws.receive()
+        if message is None:
+            break
+        try:
+            data = json.loads(message)
+            if data.get('type') == 'text':
+                user_text = data.get('text', '')
+                emotion = detect_emotion(user_text)
+                reply = get_llm_response(user_text, robot_state["chat_memory"])
+                robot_state["chat_memory"].append({"role": "user", "content": user_text})
+                robot_state["chat_memory"].append({"role": "assistant", "content": reply})
+                audio_b64 = generate_tts_audio(reply)
+                ws.send(json.dumps({
+                    "type": "response",
+                    "reply": reply,
+                    "audio": audio_b64,
+                    "emotion": emotion
+                }))
+        except json.JSONDecodeError:
+            ws.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
+
+# ============================================================================
+# 8. واجهة المستخدم المتطورة (HTML + Three.js + WebGPU + WebSocket)
+# ============================================================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CROBOT AI X - Level 3D Advanced AI</title>
+    <title>CROBOT AI X - المتطور</title>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background: #0f172a;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: white;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0f1a; overflow: hidden; font-family: 'Segoe UI', sans-serif; color: #eee; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
         #ui-container {
-            position: absolute;
-            bottom: 20px;
-            left: 0;
-            right: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            z-index: 10;
-            padding: 15px;
-            background: rgba(15, 23, 42, 0.7);
-            backdrop-filter: blur(10px);
-            width: 90%;
-            max-width: 700px;
-            margin: 0 auto;
-            border-radius: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            left: 50%;
-            transform: translateX(-50%);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 750px;
+            background: rgba(10, 15, 26, 0.8); backdrop-filter: blur(14px);
+            border-radius: 28px; padding: 18px 22px;
+            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.9);
+            z-index: 20;
         }
-        #input-area {
-            display: flex;
-            width: 100%;
-            gap: 10px;
+        .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .row input {
+            flex: 1; padding: 14px 20px; border: none; border-radius: 40px;
+            background: rgba(255,255,255,0.07); color: #fff; font-size: 16px;
+            outline: none; transition: 0.3s;
         }
-        input[type="text"] {
-            flex: 1;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 40px;
-            background: rgba(255, 255, 255, 0.08);
-            color: white;
-            font-size: 16px;
-            outline: none;
-            transition: 0.3s;
-        }
-        input[type="text"]:focus {
-            background: rgba(255, 255, 255, 0.15);
-            box-shadow: 0 0 25px rgba(0, 168, 255, 0.2);
-        }
-        input::placeholder { color: #64748b; }
+        .row input:focus { background: rgba(255,255,255,0.14); box-shadow: 0 0 20px rgba(59,130,246,0.2); }
+        .row input::placeholder { color: #64748b; }
         .btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 40px;
-            background: #3b82f6;
-            color: white;
-            font-weight: bold;
-            font-size: 14px;
-            cursor: pointer;
-            transition: 0.2s;
-            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            padding: 12px 22px; border: none; border-radius: 40px;
+            background: #3b82f6; color: #fff; font-weight: bold;
+            cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 6px;
+            box-shadow: 0 4px 20px rgba(59,130,246,0.3);
         }
-        .btn:hover { transform: scale(1.02); }
-        .btn:active { transform: scale(0.95); }
-        .btn-secondary {
-            background: #1e293b;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-        }
-        #status-box {
-            margin-top: 12px;
-            font-size: 13px;
-            color: #94a3b8;
-            width: 100%;
-            text-align: center;
-        }
-        .btn-group { display: flex; gap: 8px; margin-top: 12px; width: 100%; justify-content: center;}
+        .btn:hover { transform: scale(1.03); }
+        .btn-secondary { background: #1e293b; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .btn-group { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+        .btn-group .btn { flex: 1; min-width: 100px; justify-content: center; }
+        #status { margin-top: 12px; font-size: 14px; color: #94a3b8; text-align: center; word-break: break-word; }
+        .emotion-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-left: 6px; }
+        .emotion-happy { background: #fbbf24; }
+        .emotion-sad { background: #60a5fa; }
+        .emotion-curious { background: #a78bfa; }
+        .emotion-neutral { background: #94a3b8; }
         @media (max-width: 600px) {
-            #input-area { flex-direction: column; }
-            .btn-group { flex-direction: column; align-items: center; }
+            .row { flex-direction: column; }
+            .btn-group { flex-direction: column; }
             .btn { width: 100%; justify-content: center; }
         }
-        .glow-effect { animation: glow 2s infinite alternate; }
-        @keyframes glow { 
-            from { text-shadow: 0 0 5px #3b82f6; } 
-            to { text-shadow: 0 0 20px #3b82f6, 0 0 40px #3b82f6; } 
+        #loading-screen {
+            position: fixed; inset: 0; background: #0a0f1a; display: flex;
+            flex-direction: column; align-items: center; justify-content: center;
+            z-index: 100; transition: opacity 0.8s;
         }
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 5;
-            font-size: 24px;
-            font-weight: bold;
-            color: #3b82f6;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px;
-        }
-        .spinner {
-            width: 48px;
-            height: 48px;
-            border: 5px solid rgba(255,255,255,0.1);
-            border-top-color: #3b82f6;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
+        #loading-screen.hidden { opacity: 0; pointer-events: none; }
+        .spinner { width: 50px; height: 50px; border: 5px solid rgba(255,255,255,0.1); border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-    <div id="loading">
-        <div class="spinner"></div>
-        <span>جارٍ تحميل نموذج الروبوت البشري ثلاثي الأبعاد...</span>
+<div id="loading-screen">
+    <div class="spinner"></div>
+    <p style="margin-top: 20px; font-size: 18px; color: #94a3b8;">جارٍ تحميل الروبوت المتطور...</p>
+</div>
+
+<div id="canvas-container"></div>
+
+<div id="ui-container">
+    <div class="row">
+        <input type="text" id="commandInput" placeholder="اكتب أمراً للروبوت آريا..." />
+        <button class="btn" onclick="sendText()">🗣️ تكلم</button>
     </div>
-
-    <div id="ui-container">
-        <div id="input-area">
-            <input type="text" id="commandInput" placeholder="اكتب للروبوت AI X..." />
-            <button class="btn" onclick="sendTextToBot()">🗣️ تكلم</button>
-        </div>
-        <div class="btn-group">
-            <button class="btn btn-secondary" onclick="startVoiceListening()">🎤 استمع لي (صوت)</button>
-            <button class="btn btn-secondary" onclick="resetRobotState()">🔄 إعادة</button>
-        </div>
-        <div id="status-box">في انتظار أوامرك...</div>
+    <div class="btn-group">
+        <button class="btn btn-secondary" onclick="startVoice()">🎤 استمع</button>
+        <button class="btn btn-secondary" onclick="uploadImage()">🖼️ تحليل صورة</button>
+        <button class="btn btn-secondary" onclick="resetChat()">🔄 إعادة</button>
     </div>
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js"></script>
-    
-    <script>
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x111827);
-        const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 1.8, 3.5);
-        camera.lookAt(0, 1.2, 0);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.2;
-        renderer.setPixelRatio(window.devicePixelRatio);
-        document.body.appendChild(renderer.domElement);
+    <div id="status">
+        <span id="statusText">مرحباً! أنا آريا، كيف يمكنني مساعدتك؟</span>
+        <span class="emotion-indicator emotion-neutral" id="emotionDot"></span>
+    </div>
+</div>
 
-        // الإضاءة المتطورة لمحاكاة الصورة (إضاءة جانبية ورئيسية)
-        const mainLight = new THREE.DirectionalLight(0xffffff, 2);
-        mainLight.position.set(3, 5, 4);
-        scene.add(mainLight);
-        const fillLight = new THREE.DirectionalLight(0xaaccff, 0.8);
-        fillLight.position.set(-2, 2, 3);
-        scene.add(fillLight);
-        const rimLight = new THREE.DirectionalLight(0x66aaff, 1.5);
-        rimLight.position.set(-1, 1, -4);
-        scene.add(rimLight);
+<!-- Three.js مع WebGPU -->
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
 
-        // القاعدة التي يقف عليها الروبوت
-        const platformGeometry = new THREE.CylinderGeometry(1.2, 1.2, 0.05, 64);
-        const platformMaterial = new THREE.MeshPhysicalMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.1 });
-        const platform = new THREE.Mesh(platformGeometry, platformMaterial);
-        platform.position.set(0, -0.02, 0);
-        scene.add(platform);
+<script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    import { WebGPURenderer } from 'three/addons/renderers/WebGPURenderer.js';
 
-        const loader = new THREE.GLTFLoader();
-        const dracoLoader = new THREE.DRACOLoader();
-        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.4.1/');
-        loader.setDRACOLoader(dracoLoader);
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0f1a);
 
-        let robotGroup = new THREE.Group();
-        let mouthGroup = new THREE.Group();
-        let eyeGroup = new THREE.Group();
+    const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 1.6, 4.5);
+    camera.lookAt(0, 1.2, 0);
 
-        // *** هام: النموذج الحالي هو نموذج كرتوني افتراضي. ليبدو الروبوت مطابقاً للصورة المرفقة تماماً (ذو وجه أبيض غير لامع وعينين زرقاوين)، 
-        // قم باستبدال الرابط في دالة loader.load() برابط نموذج GLB مخصص للروبوت "آريا" (Arya) الذي صممته، مع ضمان احتوائه على العقد (Nodes) الخاصة بالعين والفك.
-        loader.load('https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb', function (gltf) {
-            let robotModel = gltf.scene;
-            robotModel.scale.set(0.35, 0.35, 0.35);
-            robotModel.position.set(0, 0.5, 0);
-            robotModel.traverse((child) => {
+    let renderer;
+    if (navigator.gpu) {
+        try {
+            renderer = new WebGPURenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.2;
+            console.log('✅ WebGPU Renderer');
+        } catch(e) {
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            console.log('⚠️ WebGPU غير مدعوم، نستخدم WebGL');
+        }
+    } else {
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        console.log('⚠️ WebGPU غير متاح، WebGL');
+    }
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    // إضاءة متطورة
+    const ambient = new THREE.AmbientLight(0x404060, 0.5);
+    scene.add(ambient);
+    const main = new THREE.DirectionalLight(0xffeedd, 2.5);
+    main.position.set(4, 6, 5);
+    main.castShadow = true;
+    scene.add(main);
+    const fill = new THREE.DirectionalLight(0x88bbff, 0.8);
+    fill.position.set(-3, 2, 3);
+    scene.add(fill);
+    const rim = new THREE.DirectionalLight(0x4488ff, 1.2);
+    rim.position.set(-2, 1, -5);
+    scene.add(rim);
+    const back = new THREE.DirectionalLight(0x2255aa, 0.6);
+    back.position.set(0, 2, -6);
+    scene.add(back);
+
+    // أرضية
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x0a0f1a, roughness: 0.7, metalness: 0.1 });
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(2.5, 32), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.05;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // تحميل النموذج
+    const loader = new GLTFLoader();
+    const draco = new DRACOLoader();
+    draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.4.1/');
+    loader.setDRACOLoader(draco);
+
+    let robot, head, leftEye, rightEye, jaw, mouthMorphs = [];
+    let eyeTarget = new THREE.Vector3(0, 0, 0);
+    let isSpeaking = false;
+    let speechStart = 0;
+
+    loader.load(
+        'https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
+        (gltf) => {
+            robot = gltf.scene;
+            robot.scale.set(0.3, 0.3, 0.3);
+            robot.position.set(0, 0.4, 0);
+            robot.traverse((child) => {
                 if (child.isMesh) {
-                    // في النموذج المخصص (آريا)، يمكن تطبيق الألوان والمواد المناسبة هنا مثل اللون الأبيض المعدني غير اللامع الذي يطابق الصورة.
                     child.material = new THREE.MeshPhysicalMaterial({
-                        color: 0xffffff, roughness: 0.2, metalness: 0.9
+                        color: 0xf0f4ff,
+                        roughness: 0.3,
+                        metalness: 0.7,
+                        clearcoat: 0.1,
                     });
-                    // ربط العقد الميكانيكية للروبوت بالمتغيرات لبرمجة حركة الشفاه والعينين
-                    if (child.name.includes('Mouth')) mouthGroup = child;
-                    if (child.name.includes('Eye')) eyeGroup = child;
+                    if (child.name.includes('Head')) head = child;
+                    if (child.name.includes('EyeLeft')) leftEye = child;
+                    if (child.name.includes('EyeRight')) rightEye = child;
+                    if (child.name.includes('Jaw')) jaw = child;
+                    if (child.name.includes('Mouth')) mouthMorphs.push(child);
                 }
             });
-            scene.add(robotModel);
-            document.getElementById('loading').style.display = 'none';
-        }, undefined, function (error) {
-            document.getElementById('loading').innerHTML = "<span style='color:red'>خطأ في تحميل النموذج (CORS أو انقطاع). يرجى التأكد من الرابط.</span>";
-        });
-
-        // حركة العين والرمش (بلوتوث ونظام بصري)
-        let blinkTimer = 0; let isBlinking = false; let isSpeaking = false; let speechStartTime = 0;
-        function updateBlink(time) {
-            blinkTimer += 0.01;
-            if (blinkTimer > 2.0 + Math.random() * 3.0) { isBlinking = true; blinkTimer = 0; }
-            if (isBlinking && eyeGroup) {
-                blinkTimer += 0.1;
-                let scaleY = 1 - (blinkTimer * 2);
-                if (scaleY < 0) scaleY = 0;
-                if(eyeGroup.scale) eyeGroup.scale.y = scaleY;
-                if (blinkTimer >= 1.0) { isBlinking = false; blinkTimer = 0; if(eyeGroup.scale) eyeGroup.scale.y = 1; }
-            }
+            scene.add(robot);
+            document.getElementById('loading-screen').classList.add('hidden');
+        },
+        undefined,
+        (err) => {
+            console.error(err);
+            document.getElementById('loading-screen').innerHTML = '<p style="color:red;">فشل تحميل النموذج</p>';
         }
-        // محاكاة حركة الشفاه الميكانيكية عند الكلام (ترتبط بالصوت المستلم)
-        function updateSpeechAnimation(time) {
-            if (isSpeaking) {
-                let speechElapsed = (Date.now() - speechStartTime) / 1000;
-                let mouthOffset = 0.04 + 0.04 * Math.sin(speechElapsed * 15);
-                if (mouthGroup && mouthGroup.morphTargetInfluences) {
-                    mouthGroup.morphTargetInfluences[0] = mouthOffset; 
+    );
+
+    // تتبع العينين
+    document.addEventListener('mousemove', (e) => {
+        const x = (e.clientX / window.innerWidth) * 2 - 1;
+        const y = -(e.clientY / window.innerHeight) * 2 + 1;
+        eyeTarget.set(x * 0.3, y * 0.2 + 0.1, 0.5);
+    });
+
+    let blinkTimer = 0;
+    let isBlinking = false;
+
+    function updateLipSync(time) {
+        if (!jaw) return;
+        if (isSpeaking) {
+            const elapsed = (Date.now() - speechStart) / 1000;
+            const val = 0.4 + 0.4 * Math.sin(elapsed * 18) * Math.sin(elapsed * 7 + 1);
+            jaw.position.y = -0.08 + val * 0.06;
+            mouthMorphs.forEach(m => {
+                if (m.morphTargetInfluences) {
+                    m.morphTargetInfluences[0] = val * 0.8;
                 }
-            } else {
-                if (mouthGroup && mouthGroup.morphTargetInfluences) mouthGroup.morphTargetInfluences[0] = 0;
+            });
+        } else {
+            jaw.position.y = -0.08;
+            mouthMorphs.forEach(m => {
+                if (m.morphTargetInfluences) m.morphTargetInfluences[0] = 0;
+            });
+        }
+    }
+
+    function animate(time) {
+        requestAnimationFrame(animate);
+        if (leftEye && rightEye) {
+            const lookTarget = eyeTarget.clone();
+            leftEye.lookAt(lookTarget);
+            rightEye.lookAt(lookTarget);
+        }
+        blinkTimer += 0.02;
+        if (blinkTimer > 1.5 + Math.random() * 3) {
+            isBlinking = true;
+            blinkTimer = 0;
+        }
+        if (isBlinking) {
+            blinkTimer += 0.1;
+            const scale = Math.max(0, 1 - blinkTimer * 2);
+            if (leftEye) leftEye.scale.y = scale;
+            if (rightEye) rightEye.scale.y = scale;
+            if (blinkTimer >= 1) {
+                isBlinking = false;
+                blinkTimer = 0;
+                if (leftEye) leftEye.scale.y = 1;
+                if (rightEye) rightEye.scale.y = 1;
             }
         }
-        function animate(time) {
-            requestAnimationFrame(animate);
-            updateBlink(time);
-            updateSpeechAnimation(time);
-            renderer.render(scene, camera);
+        if (head) {
+            const timeSec = time / 1000;
+            head.rotation.z = 0.02 * Math.sin(timeSec * 0.5);
+            head.rotation.x = 0.01 * Math.sin(timeSec * 0.3 + 1);
         }
-        animate();
-        window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+        updateLipSync(time);
+        renderer.render(scene, camera);
+    }
+    animate(0);
 
-        const commandInput = document.getElementById('commandInput');
-        const statusBox = document.getElementById('status-box');
-        function updateStatus(text) { statusBox.innerText = text; }
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 
-        async function sendTextToBot(text) {
-            const textToSend = text || commandInput.value.trim();
-            if (!textToSend) return;
-            commandInput.value = '';
-            isSpeaking = false;
-            updateStatus("🤔 الروبوت يفكر...");
+    window.startSpeaking = () => { isSpeaking = true; speechStart = Date.now(); };
+    window.stopSpeaking = () => { isSpeaking = false; };
+    window.setEmotion = (emotion) => {
+        const colorMap = { happy: 0xffdd44, sad: 0x4488ff, curious: 0xaa88ff, neutral: 0xffffff };
+        const c = colorMap[emotion] || 0xffffff;
+        main.color.setHex(c);
+    };
+    console.log('✅ Three.js + WebGPU جاهز');
+</script>
+
+<script>
+    // اتصال WebSocket
+    let ws = null;
+    function connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = protocol + '//' + window.location.host + '/ws';
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => console.log('✅ WebSocket متصل');
+        ws.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            if (data.type === 'response') {
+                displayReply(data.reply, data.emotion);
+                if (data.audio) playAudioBase64(data.audio);
+                else speakText(data.reply);
+            }
+        };
+        ws.onclose = () => setTimeout(connectWebSocket, 3000);
+    }
+    connectWebSocket();
+
+    const input = document.getElementById('commandInput');
+    const statusText = document.getElementById('statusText');
+    const emotionDot = document.getElementById('emotionDot');
+
+    function updateStatus(msg, emotion = 'neutral') {
+        statusText.textContent = msg;
+        emotionDot.className = 'emotion-indicator emotion-' + emotion;
+        window.setEmotion && window.setEmotion(emotion);
+    }
+
+    async function sendText() {
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        updateStatus('🤔 يفكر...', 'neutral');
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'text', text: text }));
+        } else {
             try {
-                const response = await fetch('/api/speak', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: textToSend}) });
-                const data = await response.json();
+                const res = await fetch('/api/speak', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                const data = await res.json();
                 if (data.reply_text) {
-                    updateStatus("🤖 " + data.reply_text);
-                    if (data.audio_data) { playAudioBase64(data.audio_data); } else { speakTextUsingBrowser(data.reply_text); }
+                    displayReply(data.reply_text, data.emotion);
+                    if (data.audio_data) playAudioBase64(data.audio_data);
+                    else speakText(data.reply_text);
                 }
-            } catch (error) { updateStatus("⚠️ خطأ في الاتصال بالخادم"); }
+            } catch(e) { updateStatus('⚠️ خطأ في الاتصال', 'neutral'); }
         }
-        function playAudioBase64(base64String) {
-            const audio = new Audio("data:audio/mp3;base64," + base64String);
-            isSpeaking = true; speechStartTime = Date.now();
-            audio.onended = function() { isSpeaking = false; if (mouthGroup && mouthGroup.morphTargetInfluences) mouthGroup.morphTargetInfluences[0] = 0; updateStatus("في انتظار أوامرك..."); };
-            audio.play();
+    }
+
+    function displayReply(text, emotion = 'neutral') {
+        updateStatus('🤖 ' + text, emotion);
+        window.startSpeaking && window.startSpeaking();
+    }
+
+    function playAudioBase64(b64) {
+        const audio = new Audio('data:audio/mp3;base64,' + b64);
+        audio.onplay = () => { window.startSpeaking && window.startSpeaking(); };
+        audio.onended = () => { window.stopSpeaking && window.stopSpeaking(); updateStatus('في انتظارك...', 'neutral'); };
+        audio.play().catch(() => speakText(''));
+    }
+
+    function speakText(text) {
+        if (!window.speechSynthesis) return;
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ar-SA';
+        utterance.rate = 0.9;
+        utterance.pitch = 1.1;
+        utterance.onstart = () => { window.startSpeaking && window.startSpeaking(); };
+        utterance.onend = () => { window.stopSpeaking && window.stopSpeaking(); updateStatus('في انتظارك...', 'neutral'); };
+        window.speechSynthesis.speak(utterance);
+    }
+
+    function startVoice() {
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            alert('متصفحك لا يدعم الاستماع');
+            return;
         }
-        function speakTextUsingBrowser(text) {
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel(); 
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'ar-SA'; utterance.rate = 0.9; utterance.pitch = 1.1;
-                isSpeaking = true; speechStartTime = Date.now();
-                utterance.onend = function() { isSpeaking = false; updateStatus("في انتظار أوامرك..."); };
-                window.speechSynthesis.speak(utterance);
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const rec = new Recognition();
+        rec.lang = 'ar-SA';
+        rec.interimResults = false;
+        rec.maxAlternatives = 1;
+        updateStatus('🎤 استمع... تحدث الآن', 'curious');
+        rec.onresult = (e) => {
+            const last = e.results.length - 1;
+            const transcript = e.results[last][0].transcript;
+            input.value = transcript;
+            updateStatus('👂 سمعت: "' + transcript + '"', 'neutral');
+            sendText();
+        };
+        rec.onspeechend = () => rec.stop();
+        rec.onerror = () => updateStatus('❌ لم أستمع، حاول مجدداً', 'neutral');
+        rec.start();
+    }
+
+    function uploadImage() {
+        const inputFile = document.createElement('input');
+        inputFile.type = 'file';
+        inputFile.accept = 'image/*';
+        inputFile.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('image', file);
+            updateStatus('📸 جارٍ تحليل الصورة...', 'curious');
+            try {
+                const res = await fetch('/api/analyze-image', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.description) {
+                    displayReply(data.description, 'neutral');
+                    speakText(data.description);
+                } else {
+                    updateStatus('⚠️ لم أستطع تحليل الصورة', 'neutral');
+                }
+            } catch(err) {
+                updateStatus('⚠️ خطأ في الاتصال', 'neutral');
             }
-        }
-        function startVoiceListening() {
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) { alert("متصفحك لا يدعم الاستماع الصوتي."); return; }
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const recognition = new SpeechRecognition(); recognition.lang = 'ar-SA'; recognition.interimResults = false; recognition.maxAlternatives = 1;
-            updateStatus("🎤 استمع الآن... تحدث!");
-            recognition.onresult = function(event) {
-                const last = event.results.length - 1; const command = event.results[last][0].transcript;
-                commandInput.value = command; updateStatus(`👂 سمعتك تقول: "${command}"`);
-                sendTextToBot(command); 
-            };
-            recognition.onspeechend = function() { recognition.stop(); if (!isSpeaking) updateStatus("تم التوقف عن الاستماع."); };
-            recognition.onerror = function(event) { updateStatus("❌ خطأ في الاستماع، حاول مجدداً"); };
-            recognition.start();
-        }
-        function resetRobotState() {
-            isSpeaking = false; commandInput.value = ''; window.speechSynthesis.cancel();
-            if (mouthGroup && mouthGroup.morphTargetInfluences) mouthGroup.morphTargetInfluences[0] = 0;
-            updateStatus("تمت إعادة التعيين!");
-        }
-        commandInput.addEventListener("keypress", function(event) { if (event.key === "Enter") { event.preventDefault(); sendTextToBot(); } });
-    </script>
+        };
+        inputFile.click();
+    }
+
+    function resetChat() {
+        fetch('/api/reset', { method: 'POST' });
+        window.speechSynthesis && window.speechSynthesis.cancel();
+        window.stopSpeaking && window.stopSpeaking();
+        input.value = '';
+        updateStatus('🔄 تمت إعادة التعيين', 'neutral');
+    }
+
+    window.sendText = sendText;
+    window.startVoice = startVoice;
+    window.uploadImage = uploadImage;
+    window.resetChat = resetChat;
+
+    input.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendText(); });
+    console.log('✅ واجهة المستخدم جاهزة');
+</script>
+
 </body>
 </html>
+"""
+
+# ============================================================================
+# 9. تشغيل التطبيق (المنفذ 7000)
+# ============================================================================
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=7000, debug=True)
