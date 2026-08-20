@@ -1,15 +1,12 @@
 """
 ================================================================================
-CROBOT AI X - النسخة المتطورة الشاملة (v3.0)
+CROBOT AI X - النسخة المتوافقة مع Vercel (بدون WebSocket)
 ================================================================================
-تم تطوير هذا الملف ليشمل:
-- عرض ثلاثي الأبعاد: Three.js + WebGPU + GLTF/DRACO + HDR
-- صوتيات متقدمة: Web Speech API (STT) + ElevenLabs (TTS) + تحليل تردد فوري
-- ذكاء اصطناعي: OpenAI GPT + RAG + Function Calling + تحليل المشاعر
-- رؤية حاسوبية: تحليل الصور عبر GPT‑4 Vision
-- اتصال فوري: WebSocket لنقل الصوت والردود لحظياً
-- نشر سحابي: جاهز لـ Vercel مع دعم متغيرات البيئة
-
+- ثلاثي الأبعاد: Three.js + WebGPU + GLTF/DRACO
+- الصوت: Web Speech API (STT) + ElevenLabs (TTS)
+- الذكاء: OpenAI GPT + RAG + Function Calling + تحليل المشاعر
+- الرؤية: GPT‑4 Vision
+- النشر: Vercel (Flask Serverless)
 ================================================================================
 """
 
@@ -20,16 +17,14 @@ import datetime
 import random
 import requests
 from flask import Flask, render_template_string, request, jsonify
-from flask_sockets import Sockets
 
-# ---------- المتغيرات البيئية (ضعها في Vercel أو ملف .env) ----------
+# ---------- المتغيرات البيئية ----------
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "YOUR_OPENAI_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "YOUR_ELEVENLABS_KEY")
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "YOUR_WEATHER_KEY")
 
-# ---------- تهيئة التطبيق ----------
+# ---------- تهيئة Flask ----------
 app = Flask(__name__)
-sockets = Sockets(app)
 
 # ---------- حالة الروبوت وذاكرته (RAG) ----------
 robot_state = {
@@ -37,8 +32,6 @@ robot_state = {
     "last_response": "",
     "chat_memory": [],          # سياق المحادثة
     "emotion": "neutral",
-    "is_speaking": False,
-    "is_listening": False
 }
 
 # ============================================================================
@@ -57,7 +50,6 @@ def get_weather(city="Algiers"):
         return "لم أتمكن من جلب الطقس حالياً."
 
 def convert_currency(amount=100, from_cur="USD", to_cur="EUR"):
-    # محاكاة (يمكن ربطها بـ API حقيقي)
     return f"{amount} {from_cur} = {amount * 0.85} {to_cur} (مثال)"
 
 def control_music(action="play"):
@@ -92,7 +84,7 @@ def execute_tool_command(text):
     return None
 
 # ============================================================================
-# 2. تحليل المشاعر (Emotion Detection)
+# 2. تحليل المشاعر
 # ============================================================================
 def detect_emotion(text):
     positive = ["حب", "فرح", "سعيد", "جميل", "رائع"]
@@ -110,18 +102,15 @@ def detect_emotion(text):
 # ============================================================================
 def get_llm_response(user_text, chat_history):
     try:
-        # تحضير السياق
         messages = [{"role": "system", "content": "أنت مساعد ذكي اسمه آريا، تتحدث العربية، لديك شخصية ودودة وتساعد المستخدم."}]
         for entry in chat_history[-10:]:
             messages.append(entry)
         messages.append({"role": "user", "content": user_text})
 
-        # محاولة استدعاء أداة أولاً
         tool_result = execute_tool_command(user_text)
         if tool_result:
             return tool_result
 
-        # استدعاء OpenAI GPT
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json"
@@ -169,7 +158,7 @@ def generate_tts_audio(text):
         return None
 
 # ============================================================================
-# 5. معالجة الصور (Computer Vision) عبر GPT‑4 Vision
+# 5. معالجة الصور (Computer Vision)
 # ============================================================================
 def analyze_image(image_bytes):
     try:
@@ -275,34 +264,7 @@ def api_reset():
     return jsonify({"status": "reset"})
 
 # ============================================================================
-# 7. WebSocket للتفاعل الفوري
-# ============================================================================
-@sockets.route('/ws')
-def echo_socket(ws):
-    while not ws.closed:
-        message = ws.receive()
-        if message is None:
-            break
-        try:
-            data = json.loads(message)
-            if data.get('type') == 'text':
-                user_text = data.get('text', '')
-                emotion = detect_emotion(user_text)
-                reply = get_llm_response(user_text, robot_state["chat_memory"])
-                robot_state["chat_memory"].append({"role": "user", "content": user_text})
-                robot_state["chat_memory"].append({"role": "assistant", "content": reply})
-                audio_b64 = generate_tts_audio(reply)
-                ws.send(json.dumps({
-                    "type": "response",
-                    "reply": reply,
-                    "audio": audio_b64,
-                    "emotion": emotion
-                }))
-        except json.JSONDecodeError:
-            ws.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
-
-# ============================================================================
-# 8. واجهة المستخدم المتطورة (HTML + Three.js + WebGPU + WebSocket)
+# 7. واجهة المستخدم (HTML + Three.js + WebGPU) – بدون WebSocket
 # ============================================================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -581,25 +543,7 @@ HTML_TEMPLATE = """
 </script>
 
 <script>
-    // اتصال WebSocket
-    let ws = null;
-    function connectWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = protocol + '//' + window.location.host + '/ws';
-        ws = new WebSocket(wsUrl);
-        ws.onopen = () => console.log('✅ WebSocket متصل');
-        ws.onmessage = (e) => {
-            const data = JSON.parse(e.data);
-            if (data.type === 'response') {
-                displayReply(data.reply, data.emotion);
-                if (data.audio) playAudioBase64(data.audio);
-                else speakText(data.reply);
-            }
-        };
-        ws.onclose = () => setTimeout(connectWebSocket, 3000);
-    }
-    connectWebSocket();
-
+    // ---------- عناصر الواجهة ----------
     const input = document.getElementById('commandInput');
     const statusText = document.getElementById('statusText');
     const emotionDot = document.getElementById('emotionDot');
@@ -610,35 +554,38 @@ HTML_TEMPLATE = """
         window.setEmotion && window.setEmotion(emotion);
     }
 
+    // ---------- إرسال النص عبر REST API ----------
     async function sendText() {
         const text = input.value.trim();
         if (!text) return;
         input.value = '';
         updateStatus('🤔 يفكر...', 'neutral');
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'text', text: text }));
-        } else {
-            try {
-                const res = await fetch('/api/speak', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text })
-                });
-                const data = await res.json();
-                if (data.reply_text) {
-                    displayReply(data.reply_text, data.emotion);
-                    if (data.audio_data) playAudioBase64(data.audio_data);
-                    else speakText(data.reply_text);
-                }
-            } catch(e) { updateStatus('⚠️ خطأ في الاتصال', 'neutral'); }
+        try {
+            const res = await fetch('/api/speak', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            });
+            const data = await res.json();
+            if (data.reply_text) {
+                displayReply(data.reply_text, data.emotion);
+                if (data.audio_data) playAudioBase64(data.audio_data);
+                else speakText(data.reply_text);
+            } else {
+                updateStatus('⚠️ لم أستجب', 'neutral');
+            }
+        } catch(e) {
+            updateStatus('⚠️ خطأ في الاتصال', 'neutral');
         }
     }
 
     function displayReply(text, emotion = 'neutral') {
         updateStatus('🤖 ' + text, emotion);
         window.startSpeaking && window.startSpeaking();
+        // سيتم إيقاف حركة الشفاه عند انتهاء الصوت عبر onended
     }
 
+    // ---------- تشغيل الصوت ----------
     function playAudioBase64(b64) {
         const audio = new Audio('data:audio/mp3;base64,' + b64);
         audio.onplay = () => { window.startSpeaking && window.startSpeaking(); };
@@ -658,6 +605,7 @@ HTML_TEMPLATE = """
         window.speechSynthesis.speak(utterance);
     }
 
+    // ---------- الاستماع الصوتي (Web Speech API) ----------
     function startVoice() {
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
             alert('متصفحك لا يدعم الاستماع');
@@ -681,6 +629,7 @@ HTML_TEMPLATE = """
         rec.start();
     }
 
+    // ---------- تحميل صورة وتحليلها ----------
     function uploadImage() {
         const inputFile = document.createElement('input');
         inputFile.type = 'file';
@@ -707,6 +656,7 @@ HTML_TEMPLATE = """
         inputFile.click();
     }
 
+    // ---------- إعادة ضبط ----------
     function resetChat() {
         fetch('/api/reset', { method: 'POST' });
         window.speechSynthesis && window.speechSynthesis.cancel();
@@ -715,6 +665,7 @@ HTML_TEMPLATE = """
         updateStatus('🔄 تمت إعادة التعيين', 'neutral');
     }
 
+    // ربط الوظائف بالـ window
     window.sendText = sendText;
     window.startVoice = startVoice;
     window.uploadImage = uploadImage;
@@ -729,7 +680,7 @@ HTML_TEMPLATE = """
 """
 
 # ============================================================================
-# 9. تشغيل التطبيق (المنفذ 7000)
+# 8. تشغيل التطبيق (محلياً على المنفذ 7000)
 # ============================================================================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=7000, debug=True)
